@@ -89,7 +89,7 @@ impl Cpu {
 	    0x4 => self.op_skip_neq_byte(x, kk),
 	    0x5 => self.op_skip_eq_reg(x, y),
 	    0x6 => self.op_set(x, kk),
-	    0x7 => self.op_set(x, kk),
+	    0x7 => self.op_add(x, kk),
 	    0x8 => match n {
 		0x0 => self.op_mov(x, y),
 		0x1 => self.op_or(x, y),
@@ -244,12 +244,14 @@ impl Cpu {
 	self.v[0xF] = 0;
 
 	for row in 0..n {
-	    let sprite = self.memory[(self.i + row as u16) as usize];
+	    let addr = (self.i + row as u16) as usize;
+	    if addr >= 4096 { break; }
+	    let sprite = self.memory[addr];
 
 	    for col in 0..8 {
 		let bit = (sprite >> (7 - col)) & 0x1;
-		let sx = (self.v[x] + col) % 64;
-		let sy = (self.v[y] + row) % 32;
+		let sx = (self.v[x] as usize + col as usize) % 64;
+		let sy = (self.v[y] as usize + row as usize) % 32;
 		let di = sy * 64 + sx;
 		if bit == 1 && self.display[di as usize] {
 		    self.v[0xF] = 1;
