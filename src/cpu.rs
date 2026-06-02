@@ -1,3 +1,5 @@
+use rand::Rng;
+
 pub struct Cpu {
     pub memory: [u8; 4096],
     pub v: [u8; 16], // V0-VF registers
@@ -126,38 +128,487 @@ impl Cpu {
 	}
     }
 
-    fn op_clear_screen(&mut self) { todo!() }
-    fn op_return(&mut self) { todo!() }
-    fn op_jump(&mut self, nnn: u16) { todo!() }
-    fn op_call(&mut self, nnn: u16) { todo!() }
-    fn op_skip_eq_byte(&mut self, x: usize, kk: u8) { todo!() }
-    fn op_skip_neq_byte(&mut self, x: usize, kk: u8) { todo!() }
-    fn op_skip_eq_reg(&mut self, x: usize, y: usize) { todo!() }
-    fn op_set(&mut self, x: usize, kk: u8) { todo!() }
-    fn op_add(&mut self, x: usize, kk: u8) { todo!() }
-    fn op_mov(&mut self, x: usize, y: usize) { todo!() }
-    fn op_or(&mut self, x: usize, y: usize) { todo!() }
-    fn op_and(&mut self, x: usize, y: usize) { todo!() }
-    fn op_xor(&mut self, x: usize, y: usize) { todo!() }
-    fn op_add_reg(&mut self, x: usize, y: usize) { todo!() }
-    fn op_sub(&mut self, x: usize, y: usize) { todo!() }
-    fn op_shr(&mut self, x: usize) { todo!() }
-    fn op_subn(&mut self, x: usize, y: usize) { todo!() }
-    fn op_shl(&mut self, x: usize) { todo!() }
-    fn op_skip_neq_reg(&mut self, x: usize, y: usize) { todo!() }
-    fn op_set_i(&mut self, nnn: u16) { todo!() }
-    fn op_jump_v0(&mut self, nnn: u16) { todo!() }
-    fn op_rand(&mut self, x: usize, kk: u8) { todo!() }
-    fn op_draw(&mut self, x: usize, y: usize, n: u8) { todo!() }
-    fn op_skip_key(&mut self, x: usize) { todo!() }
-    fn op_skip_nkey(&mut self, x: usize) { todo!() }
-    fn op_get_delay(&mut self, x: usize) { todo!() }
-    fn op_wait_key(&mut self, x: usize) { todo!() }
-    fn op_set_delay(&mut self, x: usize) { todo!() }
-    fn op_set_sound(&mut self, x: usize) { todo!() }
-    fn op_add_i(&mut self, x: usize) { todo!() }
-    fn op_font(&mut self, x: usize) { todo!() }
-    fn op_bcd(&mut self, x: usize) { todo!() }
-    fn op_store(&mut self, x: usize) { todo!() }
-    fn op_load(&mut self, x: usize) { todo!() }
+    fn op_clear_screen(&mut self) {
+	self.display.fill(false);
+	self.draw_flag = true;
+    }
+    
+    fn op_return(&mut self) {
+	self.sp -= 1;
+	self.pc = self.stack[self.sp as usize];
+    }
+    
+    fn op_jump(&mut self, nnn: u16) {
+	self.pc = nnn;
+    }
+    
+    fn op_call(&mut self, nnn: u16) {
+	self.stack[self.sp as usize] = self.pc;
+	self.sp += 1;
+	self.pc = nnn;
+    }
+    
+    fn op_skip_eq_byte(&mut self, x: usize, kk: u8) {
+	if self.v[x] == kk {
+	    self.pc += 2;
+	}
+    }
+    
+    fn op_skip_neq_byte(&mut self, x: usize, kk: u8) {
+	if self.v[x] != kk {
+	    self.pc += 2;
+	}
+    }
+    
+    fn op_skip_eq_reg(&mut self, x: usize, y: usize) {
+	if self.v[x] == self.v[y] {
+	    self.pc += 2;
+	}
+    }
+
+    fn op_skip_neq_reg(&mut self, x: usize, y: usize) {
+	if self.v[x] != self.v[y] {
+	    self.pc += 2;
+	}
+    }
+    
+    fn op_set(&mut self, x: usize, kk: u8) {
+	self.v[x] = kk;
+    }
+    
+    fn op_add(&mut self, x: usize, kk: u8) {
+	self.v[x] = self.v[x].wrapping_add(kk);
+    }
+    
+    fn op_mov(&mut self, x: usize, y: usize) {
+	self.v[x] = self.v[y];
+    }
+    
+    fn op_or(&mut self, x: usize, y: usize) {
+	self.v[x] = self.v[x] | self.v[y];
+    }
+    
+    fn op_and(&mut self, x: usize, y: usize) {
+	self.v[x] = self.v[x] & self.v[y];
+    }
+    
+    fn op_xor(&mut self, x: usize, y: usize) {
+	self.v[x] = self.v[x] ^ self.v[y];
+    }
+    
+    fn op_add_reg(&mut self, x: usize, y: usize) {
+	let (result, overflowed) = self.v[x].overflowing_add(self.v[y]);
+	self.v[x] = result;
+	self.v[0xF] = if overflowed { 1 } else { 0 };
+    }
+    
+    fn op_sub(&mut self, x: usize, y: usize) {
+	let (result, overflowed) = self.v[x].overflowing_sub(self.v[y]);
+	self.v[x] = result;
+	self.v[0xF] = if overflowed { 0 } else { 1 };
+    }
+
+    fn op_subn(&mut self, x: usize, y: usize) {
+	let (result, overflowed) = self.v[y].overflowing_sub(self.v[x]);
+	self.v[x] = result;
+	self.v[0xF] = if overflowed { 0 } else { 1 };
+    }
+    
+    fn op_shr(&mut self, x: usize) {
+	let vf = self.v[x] & 0x1;
+	self.v[x] = self.v[x] >> 1;
+	self.v[0xF] = vf;
+    }
+    
+    fn op_shl(&mut self, x: usize) {
+	let vf = (self.v[x] & 0x80) >> 7;
+	self.v[x] = self.v[x] << 1;
+	self.v[0xF] = vf;
+    }
+    
+    fn op_set_i(&mut self, nnn: u16) {
+	self.i = nnn;
+    }
+    
+    fn op_jump_v0(&mut self, nnn: u16) {
+	self.pc = nnn + self.v[0] as u16;
+    }
+    
+    fn op_rand(&mut self, x: usize, kk: u8) {
+	let rand = rand::random::<u8>();
+	self.v[x] = rand & kk;
+    }
+    
+    fn op_draw(&mut self, x: usize, y: usize, n: u8) {
+	self.draw_flag = true;
+	self.v[0xF] = 0;
+
+	for row in 0..n {
+	    let sprite = self.memory[(self.i + row as u16) as usize];
+
+	    for col in 0..8 {
+		let bit = (sprite >> (7 - col)) & 0x1;
+		let sx = (self.v[x] + col) % 64;
+		let sy = (self.v[y] + row) % 32;
+		let di = sy * 64 + sx;
+		if bit == 1 && self.display[di as usize] {
+		    self.v[0xF] = 1;
+		}
+
+		self.display[di as usize] = self.display[di as usize] ^ (bit == 1);
+	    }
+	}
+    }
+    
+    fn op_skip_key(&mut self, x: usize) {
+	if self.keypad[self.v[x] as usize] {
+	    self.pc += 2;
+	}
+    }
+    
+    fn op_skip_nkey(&mut self, x: usize) {
+	if !self.keypad[self.v[x] as usize] {
+	    self.pc += 2;
+	}
+    }
+    
+    fn op_get_delay(&mut self, x: usize) {
+	self.v[x] = self.delay_timer;
+    }
+    
+    fn op_wait_key(&mut self, x: usize) {
+	for i in 0..16 {
+	    if self.keypad[i] {
+		self.v[x] = i as u8;
+		return;
+	    }
+	}
+
+	self.pc -= 2;
+    }
+    
+    fn op_set_delay(&mut self, x: usize) {
+	self.delay_timer = self.v[x];
+    }
+    
+    fn op_set_sound(&mut self, x: usize) {
+	self.sound_timer = self.v[x];
+    }
+    
+    fn op_add_i(&mut self, x: usize) {
+	self.i += self.v[x] as u16;
+    }
+    
+    fn op_font(&mut self, x: usize) {
+	self.i = self.v[x] as u16 * 5;
+    }
+    
+    fn op_bcd(&mut self, x: usize) {
+	self.memory[self.i as usize] = self.v[x] / 100;
+	self.memory[(self.i + 1) as usize] = (self.v[x] % 100) / 10;
+	self.memory[(self.i + 2) as usize] = self.v[x] % 10;
+    }
+    
+    fn op_store(&mut self, x: usize) {
+	for i in 0..=x {
+	    self.memory[i + self.i as usize] = self.v[i];
+	}
+    }
+    
+    fn op_load(&mut self, x: usize) {
+	for i in 0..=x {
+	    self.v[i] = self.memory[i + self.i as usize];
+	}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clear_screen() {
+        let mut cpu = Cpu::new();
+        cpu.display[0] = true;
+        cpu.display[100] = true;
+        cpu.op_clear_screen();
+        assert!(cpu.display.iter().all(|&p| p == false));
+        assert!(cpu.draw_flag);
+    }
+
+    #[test]
+    fn test_jump() {
+        let mut cpu = Cpu::new();
+        cpu.op_jump(0x300);
+        assert_eq!(cpu.pc, 0x300);
+    }
+
+    #[test]
+    fn test_set() {
+        let mut cpu = Cpu::new();
+        cpu.op_set(3, 0xAB);
+        assert_eq!(cpu.v[3], 0xAB);
+    }
+
+    #[test]
+    fn test_call_and_return() {
+	let mut cpu = Cpu::new();
+	cpu.op_call(0x400);
+	assert_eq!(cpu.pc, 0x400);
+	assert_eq!(cpu.sp, 1);
+	assert_eq!(cpu.stack[0], 0x200); // original pc
+	cpu.op_return();
+	assert_eq!(cpu.pc, 0x200);
+	assert_eq!(cpu.sp, 0);
+    }
+
+    #[test]
+    fn test_skip_eq_byte() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xAB;
+	cpu.op_skip_eq_byte(0, 0xAB);
+	assert_eq!(cpu.pc, 0x202); // skipped
+	cpu.op_skip_eq_byte(0, 0x00);
+	assert_eq!(cpu.pc, 0x202); // did not skip
+    }
+
+    #[test]
+    fn test_skip_neq_byte() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xAB;
+	cpu.op_skip_neq_byte(0, 0x00);
+	assert_eq!(cpu.pc, 0x202); // skipped
+	cpu.op_skip_neq_byte(0, 0xAB);
+	assert_eq!(cpu.pc, 0x202); // did not skip
+    }
+
+    #[test]
+    fn test_skip_eq_reg() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xAB;
+	cpu.v[1] = 0xAB;
+	cpu.op_skip_eq_reg(0, 1);
+	assert_eq!(cpu.pc, 0x202); // skipped
+    }
+
+    #[test]
+    fn test_skip_neq_reg() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xAB;
+	cpu.v[1] = 0x00;
+	cpu.op_skip_neq_reg(0, 1);
+	assert_eq!(cpu.pc, 0x202); // skipped
+    }
+
+    #[test]
+    fn test_add() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xFF;
+	cpu.op_add(0, 0x01);
+	assert_eq!(cpu.v[0], 0x00); // wraps
+    }
+
+    #[test]
+    fn test_mov() {
+	let mut cpu = Cpu::new();
+	cpu.v[1] = 0xAB;
+	cpu.op_mov(0, 1);
+	assert_eq!(cpu.v[0], 0xAB);
+    }
+
+    #[test]
+    fn test_or() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0b1100;
+	cpu.v[1] = 0b1010;
+	cpu.op_or(0, 1);
+	assert_eq!(cpu.v[0], 0b1110);
+    }
+
+    #[test]
+    fn test_and() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0b1100;
+	cpu.v[1] = 0b1010;
+	cpu.op_and(0, 1);
+	assert_eq!(cpu.v[0], 0b1000);
+    }
+
+    #[test]
+    fn test_xor() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0b1100;
+	cpu.v[1] = 0b1010;
+	cpu.op_xor(0, 1);
+	assert_eq!(cpu.v[0], 0b0110);
+    }
+
+    #[test]
+    fn test_add_reg() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xFF;
+	cpu.v[1] = 0x01;
+	cpu.op_add_reg(0, 1);
+	assert_eq!(cpu.v[0], 0x00);
+	assert_eq!(cpu.v[0xF], 1); // carry set
+	cpu.v[0] = 0x01;
+	cpu.v[1] = 0x01;
+	cpu.op_add_reg(0, 1);
+	assert_eq!(cpu.v[0], 0x02);
+	assert_eq!(cpu.v[0xF], 0); // no carry
+    }
+
+    #[test]
+    fn test_sub() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0x05;
+	cpu.v[1] = 0x03;
+	cpu.op_sub(0, 1);
+	assert_eq!(cpu.v[0], 0x02);
+	assert_eq!(cpu.v[0xF], 1); // no borrow
+	cpu.v[0] = 0x03;
+	cpu.v[1] = 0x05;
+	cpu.op_sub(0, 1);
+	assert_eq!(cpu.v[0xF], 0); // borrow
+    }
+
+    #[test]
+    fn test_subn() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0x03;
+	cpu.v[1] = 0x05;
+	cpu.op_subn(0, 1);
+	assert_eq!(cpu.v[0], 0x02);
+	assert_eq!(cpu.v[0xF], 1); // no borrow
+    }
+
+    #[test]
+    fn test_shr() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0b0000_0101;
+	cpu.op_shr(0);
+	assert_eq!(cpu.v[0], 0b0000_0010);
+	assert_eq!(cpu.v[0xF], 1); // LSB was 1
+
+	cpu.v[0] = 0b0000_0100;
+	cpu.op_shr(0);
+	assert_eq!(cpu.v[0], 0b0000_0010);
+	assert_eq!(cpu.v[0xF], 0); // LSB was 0
+    }
+
+    #[test]
+    fn test_shl() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0b1000_0001;
+	cpu.op_shl(0);
+	assert_eq!(cpu.v[0], 0b0000_0010);
+	assert_eq!(cpu.v[0xF], 1); // MSB was 1
+
+	cpu.v[0] = 0b0000_0001;
+	cpu.op_shl(0);
+	assert_eq!(cpu.v[0], 0b0000_0010);
+	assert_eq!(cpu.v[0xF], 0); // MSB was 0
+    }
+
+    #[test]
+    fn test_set_i() {
+	let mut cpu = Cpu::new();
+	cpu.op_set_i(0x300);
+	assert_eq!(cpu.i, 0x300);
+    }
+
+    #[test]
+    fn test_jump_v0() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0x10;
+	cpu.op_jump_v0(0x300);
+	assert_eq!(cpu.pc, 0x310);
+    }
+
+    #[test]
+    fn test_delay_timer() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0x42;
+	cpu.op_set_delay(0);
+	assert_eq!(cpu.delay_timer, 0x42);
+	cpu.op_get_delay(1);
+	assert_eq!(cpu.v[1], 0x42);
+    }
+
+    #[test]
+    fn test_set_sound() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0x42;
+	cpu.op_set_sound(0);
+	assert_eq!(cpu.sound_timer, 0x42);
+    }
+
+    #[test]
+    fn test_add_i() {
+	let mut cpu = Cpu::new();
+	cpu.i = 0x100;
+	cpu.v[0] = 0x10;
+	cpu.op_add_i(0);
+	assert_eq!(cpu.i, 0x110);
+    }
+
+    #[test]
+    fn test_font() {
+	let mut cpu = Cpu::new();
+	cpu.v[0] = 0xA;
+	cpu.op_font(0);
+	assert_eq!(cpu.i, 0xA * 5);
+    }
+
+    #[test]
+    fn test_bcd() {
+	let mut cpu = Cpu::new();
+	cpu.i = 0x300;
+	cpu.v[0] = 123;
+	cpu.op_bcd(0);
+	assert_eq!(cpu.memory[0x300], 1);
+	assert_eq!(cpu.memory[0x301], 2);
+	assert_eq!(cpu.memory[0x302], 3);
+    }
+
+    #[test]
+    fn test_store_and_load() {
+	let mut cpu = Cpu::new();
+	cpu.i = 0x300;
+	cpu.v[0] = 0xAA;
+	cpu.v[1] = 0xBB;
+	cpu.v[2] = 0xCC;
+	cpu.op_store(2);
+	// clear registers
+	cpu.v[0] = 0;
+	cpu.v[1] = 0;
+	cpu.v[2] = 0;
+	cpu.op_load(2);
+	assert_eq!(cpu.v[0], 0xAA);
+	assert_eq!(cpu.v[1], 0xBB);
+	assert_eq!(cpu.v[2], 0xCC);
+    }
+
+    #[test]
+    fn test_draw() {
+	let mut cpu = Cpu::new();
+	cpu.i = 0x300;
+	// a simple 1-row sprite: 0b11110000
+	cpu.memory[0x300] = 0b1111_0000;
+	cpu.v[0] = 0; // x
+	cpu.v[1] = 0; // y
+	cpu.op_draw(0, 1, 1);
+	assert!(cpu.display[0]);
+	assert!(cpu.display[1]);
+	assert!(cpu.display[2]);
+	assert!(cpu.display[3]);
+	assert!(!cpu.display[4]);
+	assert_eq!(cpu.v[0xF], 0); // no collision
+	assert!(cpu.draw_flag);
+
+	// draw again in same spot — should erase and set collision
+	cpu.op_draw(0, 1, 1);
+	assert!(!cpu.display[0]);
+	assert_eq!(cpu.v[0xF], 1); // collision
+    }
 }
